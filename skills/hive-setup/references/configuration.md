@@ -163,7 +163,6 @@ sandbox:
         memory: "512Mi"
 
 prompt:
-  enable_evolution: true
   context: "Focus on optimizing the data pipeline for throughput."
   ideas:
     - "Try batching database writes"
