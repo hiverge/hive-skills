@@ -94,7 +94,6 @@ Sidecar containers (e.g. a database or queue the evaluator needs).
 Optional — omit for defaults. Steers the agents' search.
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `enable_evolution` | boolean | `false` | |
 | `context` | string | — | Experiment-specific guidance, multi-line |
 | `ideas` | list[string] | — | Distinct directions; one randomly sampled and injected each iteration |
 
