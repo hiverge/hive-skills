@@ -29,6 +29,8 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/configuration
 | `files` | list[string] | `[]` | Files/dirs to include from `source`. Empty = everything. Patterns applied in order; `!`-prefix excludes; globs (`*`, `?`, `[…]`) supported. Hidden files and symlinks skipped. |
 | `branch` | string | `main` | Branch to use when cloning a remote source |
 | `evaluation_script` | string | `evaluation.py` | Path relative to repo root; run as `python3 <path>` |
+| `evaluation_arguments` | list | `[]` | Splits evaluation into several concurrent sub-evaluators — one entry per evaluator, passed as that run's command-line arguments. Requires `aggregation_script`. See `references/multi-evaluator.md`. |
+| `aggregation_script` | string | `null` | Combines per-evaluator results into the experiment's final result. Only valid with `evaluation_arguments`. See `references/multi-evaluator.md`. |
 | `target_code` | list[string] | `[]` | Files/ranges the agents may rewrite. Empty = every file in the codebase is evolvable (except the evaluation script); `!`-prefix excludes, e.g. `["!fixed.py"]` = evolve everything but `fixed.py`. Any file extension is allowed. |
 | `additional_context` | list[string] | `[]` | Supporting files agents read but don't edit |
 
@@ -95,7 +97,7 @@ Optional — omit for defaults. Steers the agents' search.
 | `ideas` | list[string] | — | Distinct directions; one randomly sampled and injected each iteration |
 
 ## Evaluator output contract
-`evaluate.py` must print a JSON object on the **final line** of stdout.
+`evaluate.py` must print a JSON object on the **final line** of stdout, and must **exit 0 even when reporting a failure** — a non-zero exit code is a crashed evaluator, not a failed candidate. Report invalid candidates with `{"status": "failed", ...}` and exit cleanly.
 
 On success:
 ```json
@@ -166,12 +168,17 @@ prompt:
 ```
 
 ## CLI cheat-sheet
+Source: https://docs.hiverge.ai/gettingstarted/cli/reference
+
 - `hive init` — set up `~/.hive/config.yaml` (org ID)
 - `hive login` / `hive logout` — authenticate / clear credentials
-- `hive create exp -c hive.yaml [key.path=value ...]` — launch; inline dot-notation overrides the YAML; `~key.path` removes a key (restores default)
+- `hive create exp -c hive.yaml [--dry-run] [key.path=value ...]` — launch; `--dry-run` validates the config without starting anything; inline dot-notation overrides the YAML; `~key.path` removes a key (restores default)
+- `hive shell -c hive.yaml [--max-duration SECONDS] [--allow-missing-files]` — open an interactive shell in a sandbox built from the config; the way to reproduce the environment and test `evaluate.py` before spending compute. Also `hive shell --exp <name> --content-uid <uid>` to enter a sandbox for a specific candidate from a running experiment
 - `hive list exp` — table of experiments (NAME, AGENTS ready/total, STATUS, AGE)
 - `hive get exp <name>` — detailed spec + status
-- `hive logs <name> --source {all,coordinator,sandbox} [--worker N] [--no-follow]` — stream logs (live by default; `--source` defaults to `all`; `--worker` selects a sandbox worker)
+- `hive get config <name>` — the resolved config an experiment is running with
+- `hive logs <name> --source {all,coordinator,sandbox} [--worker N] [--no-follow]` — stream logs (live by default; `--source` defaults to `all`; `--worker` selects a sandbox worker, 0-based)
 - `hive stop exp <name> [...] [-y]` — stop one or more running experiments
 - `hive dashboard [--no-browser]` — open the dashboard
-- `hive list image` / `hive push image <local> hive:<short>:<tag> [--sync-config hive.yaml]` / `hive delete image <image> [--all]` — manage custom base images (`--sync-config` pins the pushed image's digest into the config)
+- `hive list coordinators` — available coordinator configs (for `coordinator_config_name`)
+- `hive list image` / `hive push image <local> hive:<short>:<tag> [--sync-config hive.yaml]` / `hive delete image <image> [--all]` — manage custom base images

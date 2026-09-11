@@ -24,6 +24,8 @@ Assume the user already has the Hivekit CLI installed and authenticated (`hive l
 
 For the full configuration field reference, read `references/configuration.md` — pull it in whenever you're unsure about a field name, default, or syntax.
 
+If the evaluation splits into independent pieces that can be scored in parallel — slices of a dataset, several benchmarks — or the workload wants many single-GPU sandboxes instead of one multi-GPU one, read `references/multi-evaluator.md` before writing `evaluate.py` and `hive.yaml`; it changes the shape of both.
+
 
 ## Step 1 — Understand the task
 
@@ -107,6 +109,8 @@ Evolution works best with a graded signal, not pass/fail. Aim for a metric that 
 ### Keep evaluations fast
 
 Faster evaluation means faster iteration, so target well under the `sandbox.evaluation_timeout` on baseline code — with headroom, since better solutions sometimes use more time/memory and resource exhaustion counts as a failure.
+
+If a single evaluation is unavoidably slow because it grinds through independent pieces — dataset slices, a suite of benchmarks, many test scenarios — you can split it across sandboxes to run them concurrently instead of serially. That's a **multi-evaluator**: `repo.evaluation_arguments` runs `evaluate.py` once per argument set, and a separate `aggregation_script` you also write combines the per-piece results into the final fitness. It changes the shape of both `evaluate.py` (it must take arguments selecting its piece) and `hive.yaml`, so decide before writing either — read `references/multi-evaluator.md` if you're going this route.
 
 ### Single vs. multi-objective fitness
 
@@ -316,9 +320,10 @@ Field-level details (types, defaults, full syntax) are in `references/configurat
 ### Choosing `num_sandboxes`, `max_runtime_seconds` and hardware — ask if unsure
 
 These drive cost and feasibility, so **when unsure about sandbox count, runtime, GPU type, or memory, ask the user** rather than guessing.
-- Start around 5–10 sandboxes for a typical CPU experiment; scale up (toward 20–30) for harder search spaces. More sandboxes = more parallel exploration but more cost. (The field was called `num_agents` in older configs — still accepted, but deprecated; write `num_sandboxes`.)
+- Start around 5–10 sandboxes for a typical CPU experiment; scale up (toward 20–30) for harder search spaces. More sandboxes = more parallel exploration but more cost. With a multi-evaluator, size it as (sub-evaluations) × (parallel attempts), or the pieces just serialize.
 - **Always set `max_runtime_seconds`** — default to 1–2 hours (3600–7200) for a first run. Never leave it unset (infinite) unless the user explicitly asks for an open-ended experiment; an uncapped run burns budget silently if the metric plateaus.
 - Only request `accelerators` when the workload genuinely needs a GPU (ML training/inference, CUDA kernels). Available: `a100-80gb`, `a100-40gb`, `h100`, `h200`, `b200`, `a10`, `t4`, `l4`, `l40s`.
+- **Prefer many small GPU sandboxes over one large allocation.** A request like `a100-80gb:8` schedules far more slowly than eight separate `a100-80gb:1` sandboxes, so if the evaluation can be split into independent pieces, do that instead of asking for one big multi-GPU box — see `references/multi-evaluator.md`. Only request multiple GPUs in a single sandbox when one evaluation genuinely needs them together (a model that doesn't fit on one card, multi-GPU communication being the thing under optimization).
 
 ### Validate the configuration
 
@@ -353,9 +358,20 @@ hive push image <local-tag> hive:<remote-tag>:<version>
 # run, so changes take effect immediately without a rebuild + re-push.
 ```
 
+**Recommended before launching — validate the evaluator in a real sandbox**
+
+`hive shell` builds the same sandbox this config describes and drops you into it, so you can check the evaluator against the real environment before spending compute:
+
+```
+hive shell -c /absolute/path/to/hive.yaml --max-duration 600
+
+# inside the sandbox:
+python3 evaluate.py    # want "status": "success" on the last line, well under evaluation_timeout
+```
+
 **How to launch the Hive experiment**
 
-Run
+Once the evaluator checks out, run
 
 ```
 hive create exp -c /absolute/path/to/hive.yaml
@@ -364,7 +380,5 @@ hive create exp -c /absolute/path/to/hive.yaml
 Other useful commands:
 - `hive dashboard` — watch progress and fitness over time
 - `hive stop exp <name>` — stop the run
-
-Before spending compute, it's worth validating locally — reproduce the sandbox and confirm `evaluate.py` prints `"status": "success"` on the baseline — and re-reading the evaluator for reward-hacking loopholes (see "Guard against reward hacking" in Step 3), so the Hive optimizes the metric you actually intended.
 
 ---
