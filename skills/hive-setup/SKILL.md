@@ -24,6 +24,8 @@ Assume the user already has the Hivekit CLI installed and authenticated (`hive l
 
 For the full configuration field reference, read `references/configuration.md` — pull it in whenever you're unsure about a field name, default, or syntax.
 
+If the sandbox needs a GPU, read `references/gpu-hardware.md` before writing `hive.yaml` — it decides `provider` (AWS vs. Modal) and tells you whether the vCPU request will strand GPUs on the instances that carry that accelerator.
+
 If the evaluation splits into independent pieces that can be scored in parallel — slices of a dataset, several benchmarks — or the workload wants many single-GPU sandboxes instead of one multi-GPU one, read `references/multi-evaluator.md` before writing `evaluate.py` and `hive.yaml`; it changes the shape of both.
 
 
@@ -263,6 +265,7 @@ prompt:
 ```yaml
 apiversion: v1alpha1
 experiment_name: my-cpp-exp-
+provider: modal                   # premium GPU below ⇒ modal; see references/gpu-hardware.md
 
 repo:
   source: /absolute/path/to/directory
@@ -324,6 +327,7 @@ These drive cost and feasibility, so **when unsure about sandbox count, runtime,
 - **Always set `max_runtime_seconds`** — default to 1–2 hours (3600–7200) for a first run. Never leave it unset (infinite) unless the user explicitly asks for an open-ended experiment; an uncapped run burns budget silently if the metric plateaus.
 - Only request `accelerators` when the workload genuinely needs a GPU (ML training/inference, CUDA kernels). Available: `a100-80gb`, `a100-40gb`, `h100`, `h200`, `b200`, `a10`, `t4`, `l4`, `l40s`.
 - **Prefer many small GPU sandboxes over one large allocation.** A request like `a100-80gb:8` schedules far more slowly than eight separate `a100-80gb:1` sandboxes, so if the evaluation can be split into independent pieces, do that instead of asking for one big multi-GPU box — see `references/multi-evaluator.md`. Only request multiple GPUs in a single sandbox when one evaluation genuinely needs them together (a model that doesn't fit on one card, multi-GPU communication being the thing under optimization).
+- **With a GPU, `provider`, `cpu` and `num_sandboxes` are one decision — read `references/gpu-hardware.md` before writing the config.** Briefly: premium GPUs and small single-GPU sandboxes belong on `provider: modal`; on `aws` the machine tiers are coarse, so a too-large `cpu` leaves GPUs idle. Warn the user rather than silently applying or rewriting a request that packs badly.
 
 ### Validate the configuration
 

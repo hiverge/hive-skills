@@ -21,6 +21,7 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/configuration
 | `apiversion` | string | `v1alpha1` | Schema version |
 | `experiment_name` | string | required | Valid DNS label (`[a-z0-9-]`, max 51 chars, no leading `-`); trailing `-` appends a random 7-char unique suffix, so a name ending in `-` may have at most 43 chars before the `-` |
 | `coordinator_config_name` | string | `default-coordinator-config` | |
+| `provider` | string | `aws` | Where sandboxes are scheduled: `aws` or `modal`. GPU workloads usually belong on `modal`; see [`gpu-hardware.md`](gpu-hardware.md) for the decision rules and the vCPU-vs-GPU packing check |
 
 ## `repo`
 | Field | Type | Default | Notes |
@@ -75,6 +76,7 @@ repo:
 
 Available accelerators: `a100-80gb`, `a100-40gb`, `h100`, `h200`, `b200`, `a10`, `t4`, `l4`, `l40s`.
 Tip: allocate resources and timeouts with headroom — resource exhaustion counts as a failed evaluation.
+When `accelerators` is set, `cpu`, `runtime.num_sandboxes` and the top-level `provider` need choosing together: Kubernetes reserves ~2 vCPU per machine, and on AWS a too-large `cpu` request leaves the machine's other GPUs idle. See [`gpu-hardware.md`](gpu-hardware.md).
 
 ## `sandbox.services[]`
 Sidecar containers (e.g. a database or queue the evaluator needs).
@@ -120,6 +122,7 @@ On failure (incorrect candidate, error, timeout, build failure):
 apiversion: v1alpha1
 experiment_name: my-experiment-
 coordinator_config_name: default-coordinator-config
+provider: aws
 
 repo:
   source: https://github.com/your-org/your-repo.git
