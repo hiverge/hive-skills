@@ -8,7 +8,7 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/configuration#multi-evaluator
 By default a single evaluation produces the fitness. Setting `repo.evaluation_arguments` splits the evaluation into several sub-evaluations that run **concurrently across sandboxes**, with `repo.aggregation_script` combining their results into the experiment's fitness. Reach for it when:
 
 - **The objective decomposes into independent pieces** — slices of a dataset, several benchmarks, a suite of test scenarios — that can be scored in parallel.
-- **You want many small GPU sandboxes instead of one big one.** A single large allocation such as `a100-80gb:8` is far slower to schedule than eight separate `a100-80gb:1` sandboxes. Splitting the evaluation across many single-GPU sandboxes provisions much faster than requesting one multi-GPU sandbox — often the main reason to reach for a multi-evaluation at all. Size each sub-evaluation's `cpu` with packing in mind — see [`gpu-hardware.md`](gpu-hardware.md).
+- **You want many small GPU sandboxes instead of one big one.** A single large allocation such as `a100-80gb:8` is far slower to schedule than eight separate `a100-80gb:1` sandboxes. Splitting the evaluation across many single-GPU sandboxes provisions much faster than requesting one multi-GPU sandbox — often the main reason to reach for a multi-evaluation at all. Size each sub-evaluation's `cpu` with the machine tiers in mind — see [`gpu-hardware.md`](gpu-hardware.md).
 
 If the evaluation is one indivisible measurement, stay with a single evaluation.
 

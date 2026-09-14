@@ -1,20 +1,20 @@
 # Provider and hardware selection
 
-How to pick `provider`, and how to size `sandbox.resources` so sandboxes pack onto real machines without stranding GPUs.
+How to pick `provider`, and how to size `sandbox.resources` so sandboxes fit onto real machines without stranding GPUs.
 
 
 ## Choosing a provider
 
 `provider` is a **top-level** field in `hive.yaml` (sibling of `experiment_name`, `repo`, `runtime`, `sandbox`), and takes `aws` or `modal`.
 
-Apply these rules in order:
+Apply these rules in order — the outcome is a derivation, not a user preference, so set the field and report it rather than asking:
 
 1. **Premium GPU ⇒ `modal`.** If `accelerators` names `a100-40gb`, `a100-80gb`, `h100`, `h200`, `b200`, schedule on Modal. On AWS these live almost exclusively on 8-GPU instances (see the catalog below), so a sandbox has to wait for a whole 8-GPU machine and then shares it with — at best — seven siblings. Modal allocates a single premium GPU per container with an independent CPU request, so it schedules faster and wastes nothing.
 2. **Any GPU with a modest CPU need (< 8 vCPU) ⇒ `modal`.** Small single-GPU sandboxes are exactly what Modal's per-container GPU allocation is good at, and they schedule far faster there than while waiting for a slice of a GPU instance.
 3. **Otherwise ⇒ `aws`.** CPU-only experiments, and CPU-heavy (≥ 8 vCPU) sandboxes on the smaller GPUs (`t4`, `l4`, `a10`, `l40s`), which have generous 1-GPU instance sizes.
 
 
-## Packing AWS GPU machines
+## Fitting sandboxes onto AWS GPU machines
 
 Hive runs sandboxes on Kubernetes, so a machine can't hand its full vCPU count to sandboxes — **about 2 vCPU per machine** stays reserved for the system components. A machine of `V` vCPU therefore has `V - 2` to give out, and fits `floor((V - 2) / cpu)` sandboxes.
 
@@ -50,16 +50,13 @@ Sources: AWS instance-type pages for
 | `b200` | p6-b200 | 192/8 |
 
 
-**Worked example** `accelerators: l4:1`, `cpu: "12"`, `provider: aws`. A `g6.12xlarge` has 48 vCPU and 4 L4, so 4 × 12 looks like an exact fit — but the vCPU overhead required means we can't fit 4 sandboxes without spilling into the next machine up `g6.24xlarge`, which results in a large vCPU wastage. `cpu: "11"` fits all 4 on the `g6.12xlarge`.
-
-
 ### Warning the user
 
-If the user asks to change `cpu`, the accelerator, or `num_sandboxes` in a way that packs badly, warn them before applying it — don't accept it silently, and don't quietly substitute your own numbers either; they may know something you don't about the workload. Tell them, concretely:
+If the user asks to change `cpu`, the accelerator, or `num_sandboxes` in a way that wastes hardware, warn them before applying it — don't accept it silently, and don't quietly substitute your own numbers either; they may know something you don't about the workload. Tell them, concretely:
 
 - which machine the new request lands on, and how many sandboxes fit on it once the ~2 vCPU reserve is taken out;
 - how many GPUs that leaves idle, or which larger machine tier it spills onto;
-- the nearest values that would pack cleanly, and that a smaller `cpu` is both **cheaper** and **quicker to schedule** — it packs the same sandboxes onto fewer machines, and needs a smaller free slice to land on;
-- that `provider: modal` sidesteps packing entirely for single-GPU sandboxes.
+- the nearest values that would fit cleanly, and that a smaller `cpu` is both **cheaper** and **quicker to schedule** — it fits the same sandboxes onto fewer machines, and needs a smaller free slice to land on;
+- that `provider: modal` sidesteps the whole question for single-GPU sandboxes.
 
 Then ask whether to reduce `cpu`, raise `num_sandboxes` to fill the machine, or keep the request as it is. If they confirm it, apply it and note the trade-off in the Step 5 summary.

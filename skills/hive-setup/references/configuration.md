@@ -21,7 +21,7 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/configuration
 | `apiversion` | string | `v1alpha1` | Schema version |
 | `experiment_name` | string | required | Valid DNS label (`[a-z0-9-]`, max 51 chars, no leading `-`); trailing `-` appends a random 7-char unique suffix, so a name ending in `-` may have at most 43 chars before the `-` |
 | `coordinator_config_name` | string | `default-coordinator-config` | |
-| `provider` | string | `aws` | Where sandboxes are scheduled: `aws` or `modal`. GPU workloads usually belong on `modal`; see [`gpu-hardware.md`](gpu-hardware.md) for the decision rules and the vCPU-vs-GPU packing check |
+| `provider` | string | `aws` | Where sandboxes are scheduled: `aws` or `modal`. GPU workloads usually belong on `modal`; see [`gpu-hardware.md`](gpu-hardware.md) for the decision rules and the vCPU-vs-GPU fit check |
 
 ## `repo`
 | Field | Type | Default | Notes |

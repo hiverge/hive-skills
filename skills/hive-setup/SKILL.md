@@ -20,11 +20,13 @@ Assume the user already has the Hivekit CLI installed and authenticated (`hive l
 
 **Resolve questions first, then write everything in one pass.** Clarify the metric, target, and correctness gate in Step 1 — those questions are cheap and shape every artifact. Once you have answers, produce all files (baseline if needed, `evaluate.py`, `hive.yaml`) without pausing, then present the summary (Step 5).
 
+**Keep this skill's machinery out of what the user reads.** Questions, warnings, and the Step 5 summary talk about *their* experiment — the target, the metric, the hardware, the cost. Don't cite these reference files by name, don't explain a recommendation in terms of the rules or docs you followed to reach it, and never frame a choice as a way to exercise or check this skill. Give the reason that matters to the user (this GPU is cheapest, this vCPU count fills the machine instead of stranding GPUs), not its provenance.
+
 **This is collaborative — work with the user, don't just hand them an answer.** Good setup depends on judgment calls only the user can make: surface your assumptions, check the decisions that matter, let them steer, and **ask whenever you're unsure — don't guess.** A wrong assumption about the metric, correctness check, target, or environment wastes real compute before anyone notices it's measuring the wrong thing; a clarifying question is far cheaper.
 
 For the full configuration field reference, read `references/configuration.md` — pull it in whenever you're unsure about a field name, default, or syntax.
 
-If the sandbox needs a GPU, read `references/gpu-hardware.md` before writing `hive.yaml` — it decides `provider` (AWS vs. Modal) and tells you whether the vCPU request will strand GPUs on the instances that carry that accelerator.
+If the sandbox needs a GPU, read `references/gpu-hardware.md` **before you ask the user anything about hardware**, not just before writing `hive.yaml` — it decides `provider` (AWS vs. Modal) and tells you whether the vCPU request will strand GPUs on the instances that carry that accelerator.
 
 If the evaluation splits into independent pieces that can be scored in parallel — slices of a dataset, several benchmarks — or the workload wants many single-GPU sandboxes instead of one multi-GPU one, read `references/multi-evaluator.md` before writing `evaluate.py` and `hive.yaml`; it changes the shape of both.
 
@@ -327,7 +329,7 @@ These drive cost and feasibility, so **when unsure about sandbox count, runtime,
 - **Always set `max_runtime_seconds`** — default to 1–2 hours (3600–7200) for a first run. Never leave it unset (infinite) unless the user explicitly asks for an open-ended experiment; an uncapped run burns budget silently if the metric plateaus.
 - Only request `accelerators` when the workload genuinely needs a GPU (ML training/inference, CUDA kernels). Available: `a100-80gb`, `a100-40gb`, `h100`, `h200`, `b200`, `a10`, `t4`, `l4`, `l40s`.
 - **Prefer many small GPU sandboxes over one large allocation.** A request like `a100-80gb:8` schedules far more slowly than eight separate `a100-80gb:1` sandboxes, so if the evaluation can be split into independent pieces, do that instead of asking for one big multi-GPU box — see `references/multi-evaluator.md`. Only request multiple GPUs in a single sandbox when one evaluation genuinely needs them together (a model that doesn't fit on one card, multi-GPU communication being the thing under optimization).
-- **With a GPU, `provider`, `cpu` and `num_sandboxes` are one decision — read `references/gpu-hardware.md` before writing the config.** Briefly: premium GPUs and small single-GPU sandboxes belong on `provider: modal`; on `aws` the machine tiers are coarse, so a too-large `cpu` leaves GPUs idle. Warn the user rather than silently applying or rewriting a request that packs badly.
+- **With a GPU, read `references/gpu-hardware.md` before writing the config.** Its ordered rules pin `provider` from the accelerator and `cpu` — derive it yourself rather than asking, don't fold it into a question about something else, and don't offer it as one option among several. `cpu` and `num_sandboxes` are the ones worth asking about: on `aws` the machine tiers are coarse, so a too-large `cpu` leaves GPUs idle. Warn the user rather than silently applying or rewriting a request that wastes hardware.
 
 ### Validate the configuration
 
