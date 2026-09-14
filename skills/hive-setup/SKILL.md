@@ -24,6 +24,8 @@ Assume the user already has the Hivekit CLI installed and authenticated (`hive l
 
 For the full configuration field reference, read `references/configuration.md` — pull it in whenever you're unsure about a field name, default, or syntax.
 
+If the evaluation splits into independent pieces that can be scored in parallel — slices of a dataset, several benchmarks — or the workload wants many single-GPU sandboxes instead of one multi-GPU one, read `references/multi-evaluator.md` before writing `evaluate.py` and `hive.yaml`; it changes the shape of both.
+
 
 ## Step 1 — Understand the task
 
@@ -32,7 +34,7 @@ For the full configuration field reference, read `references/configuration.md` �
 ### What to evolve
 
 0. **Starting point** — does a working implementation already exist, or are you bootstrapping one? Look at the repo: is there real algorithm code in the target, or just stubs/interfaces/`NotImplementedError`/a problem spec? If it's the latter (or there's no repo at all), you'll write the baseline in Step 2 before wrapping it. When in doubt, ask the user whether they have a starting solution or want you to create one.
-1. **Target code** — which file(s), and ideally which function(s) or line ranges, the Hive may rewrite. Everything outside `target_code` stays frozen, so the target should be the algorithm, not the test harness. **Target code in place** — don't extract parts of the code into a new file for the experiment. Target them where they already live so agents see each value next to the logic it affects.
+1. **Target code — and the scope of evolution.** First settle *how wide* the search should be: is this one algorithm/heuristic/kernel in a single or a few distinct, well-defined files (name those paths), or a general whole-codebase optimization where the win could come from anywhere (leave the target open and fence off what must stay fixed)? Ask if it's ambiguous — see the `target_code` note in Step 4 for how each case is expressed. Either way, everything outside the target stays frozen, so the target should cover the algorithm and not the test harness. **Target code in place** — don't extract parts of the code into a new file for the experiment. Target them where they already live so agents see each value next to the logic it affects.
 2. **Metric** — what "better" means. Throughput, latency, accuracy, compression ratio, etc. Hive *maximizes* fitness, so a quantity you want to minimize (like runtime) must be negated or inverted (see Step 3).
 3. **Correctness** — how to tell a candidate is *valid*. This is what stops the optimizer from cheating.
 4. **Test inputs** — how evaluation inputs are produced (generated, loaded from a fixture, a benchmark dataset).
@@ -70,7 +72,7 @@ Beyond "make it run," a few things to get right:
 
 ## Step 3 — Write `evaluate.py`
 
-The evaluator is run as `python evaluate.py` from the repo root. It must print a **JSON object on the final line** of stdout. On success:
+The evaluator is run as `python3 evaluate.py` from the repo root. It must print a **JSON object on the final line** of stdout. On success:
 
 ```json
 {"status": "success", "result": {"fitness": 0.85, "feedback_message": "throughput +23% vs baseline"}}
@@ -107,6 +109,8 @@ Evolution works best with a graded signal, not pass/fail. Aim for a metric that 
 ### Keep evaluations fast
 
 Faster evaluation means faster iteration, so target well under the `sandbox.evaluation_timeout` on baseline code — with headroom, since better solutions sometimes use more time/memory and resource exhaustion counts as a failure.
+
+If evaluation is unavoidably slow because it grinds through independent pieces — dataset slices, a suite of benchmarks, many test scenarios — you can split it across sandboxes to run them concurrently instead of serially. That's a **multi-evaluation**: if `repo.evaluation_arguments` is set, then `evaluate.py` is run once per entry in this list on its own sandbox, and a separate `aggregation_script` you also write combines the per-piece results into the final fitness. It changes the shape of both `evaluate.py` (it must take arguments selecting its piece) and `hive.yaml`, so decide before writing either — read `references/multi-evaluator.md` if you're going this route.
 
 ### Single vs. multi-objective fitness
 
@@ -145,7 +149,7 @@ if __name__ == "__main__":
     main()
 ```
 
-**`evaluate.py` is always Python** — Hive runs it as `python evaluate.py`. To evaluate code in another language (C/C++/Rust/Go/CUDA/etc.), drive it from this Python script with `subprocess`: compile the candidate (treat a build failure as a failed run — `{"status": "failed", "error": "build failed: ..."}`), then run the resulting binary and parse its output. The target the agents evolve can be in any language; only the evaluator that scores it must be Python. Keep the evaluator modular — small helpers are easier to get right than one big block.
+**`evaluate.py` is always Python** — Hive runs it as `python3 evaluate.py`. To evaluate code in another language (C/C++/Rust/Go/CUDA/etc.), drive it from this Python script with `subprocess`: compile the candidate (treat a build failure as a failed run — `{"status": "failed", "error": "build failed: ..."}`), then run the resulting binary and parse its output. The target the agents evolve can be in any language; only the evaluator that scores it must be Python. Keep the evaluator modular — small helpers are easier to get right than one big block.
 
 ### Template B — compiled target (C/C++/CUDA) driven via `subprocess`
 
@@ -217,7 +221,7 @@ Pick one strategy before writing the config. The decision is simple:
 | Is it compiled, but builds in seconds? | Yes | **A — Stock image** |
 | Does a full build take minutes? | Yes | **B — Prebuilt image** |
 
-**Strategy A — Stock image.** Use a stock `base_image` (`python:3.12-slim`, `gcc`, `rust`, `nvidia/cuda`), install deps in `setup_script`, and let `evaluate.py` handle any per-candidate compilation (Template B from Step 3). This covers both interpreted targets and small compiled targets. For the skill's own seeded experiments, `repo.source` should usually be a **local directory** (so uncommitted seed/evaluator files upload directly) — unless those files already live in a repo and the user only needs the `hive.yaml`.
+**Strategy A — Stock image.** Use a stock `base_image` (`python:3.14-slim`, `gcc`, `rust`, `nvidia/cuda`), install deps in `setup_script`, and let `evaluate.py` handle any per-candidate compilation (Template B from Step 3). This covers both interpreted targets and small compiled targets. For the skill's own seeded experiments, `repo.source` should usually be a **local directory** (so uncommitted seed/evaluator files upload directly) — unless those files already live in a repo and the user only needs the `hive.yaml`.
 
 **Strategy B — Prebuilt image.** Bake the codebase and heavy dependencies into a custom Docker image. **Don't assume this image exists.** Unless the user says they have one, building it is part of your job: confirm they want this route, write the `Dockerfile`, and set `base_image` to `hive:<remote-tag>:<version>`.
 
@@ -235,11 +239,11 @@ repo:
     - path/to/target.py           # whole file, or target.py:10-50 for a line range
 
 runtime:
-  num_agents: 10                  # parallel agents; see guidance below
+  num_sandboxes: 10               # parallel sandboxes; see guidance below
   max_runtime_seconds: 3600       # -1 = unlimited
 
 sandbox:
-  base_image: python:3.12-slim
+  base_image: python:3.14-slim
   setup_script: |
     pip install -r requirements.txt   # runs once at sandbox creation, from repo root
   evaluation_timeout: 600           # seconds; must exceed baseline evaluate.py runtime
@@ -269,7 +273,7 @@ repo:
     - src/solver.cpp
 
 runtime:
-  num_agents: 10
+  num_sandboxes: 10
   max_runtime_seconds: 3600
 
 sandbox:
@@ -303,41 +307,53 @@ This is the agents' primary steer. Write it as an onboarding document — imagin
 
 Field-level details (types, defaults, full syntax) are in `references/configuration.md`. These are the choices that matter most:
 
+- **`target_code`** — decide the **scope of evolution** here; it's a real choice, not a formality.
+  - *Bounded scope* — the thing being optimized is one algorithm, heuristic, or kernel living in a single file or a few distinct, well-defined ones. **List those paths explicitly** (narrow to line ranges where the file mixes the algorithm with harness/plumbing).
+  - *Whole-codebase scope* — the user wants the system optimized end-to-end and the wins could come from anywhere, with no single obvious hot file. **Leave `target_code` empty**, which lets the Hive evolve any file except the evaluation (and aggregation) script, and use `!`-prefixed entries to fence off what must stay fixed (`["!fixed.py"]` = evolve everything but `fixed.py`). Fence off anything correctness depends on — reference implementations, checkers, fixtures, test harnesses — otherwise the agents can weaken the very code that's meant to catch them.
+  - **If it's unclear which of the two the user wants, ask.** Getting this wrong is expensive in opposite directions: too narrow and the Hive can't reach the improvement; too broad and the search dilutes across files that don't matter.
 - **`setup_script`** — the most common source of failures. Runs from repo root; must install everything `evaluate.py` imports. Omit only if the base image already has every dependency.
 - **Large data (GBs)** — if data is public, download in `setup_script` (curl/wget/`huggingface-cli`), not via `source`/`repo.files`. Multi-GB uploads are slow and may fail.
 - **Never put secrets in a Hive file.** API keys, tokens, and passwords must never appear in `hive.yaml`, `setup_script`, `evaluate.py`, or anything under `repo`/`repo.files` — these are committed, shared, and baked into sandboxes, so a credential there is a leak. This is a hard rule. If access to a resource needs a credential (e.g. a gated or private Hugging Face model, a private dataset), **do not** authenticate from `setup_script`. Instead fetch it *locally*, where you already hold the credential, and make the resulting artifact available without the secret — ship it in the repo if small enough, or bake it into a prebuilt image (Strategy B) / upload it to storage the sandbox can read without a per-user secret if large. If you find yourself needing a token to make the experiment run, stop and flag it to the user rather than embedding it.
 - **`evaluation_timeout`** — must comfortably exceed baseline `evaluate.py` runtime.
 - **`repo.additional_context`** — files the agents can *read* but not edit. Agents see only `target_code` plus what you list here; if the target calls an API they can't see, they'll hallucinate its signature. Include the interfaces the target depends on (imports, called functions, input shapes) — but be minimal: narrow to relevant files or line ranges (`file.py:1-50`). The test: *would the target be ambiguous without this file?* **Code files only — no `.md` or prose docs.**
 
-### Choosing `num_agents`, `max_runtime_seconds` and hardware — ask if unsure
+### Choosing `num_sandboxes`, `max_runtime_seconds` and hardware — ask if unsure
 
-These drive cost and feasibility, so **when unsure about agent count, runtime, GPU type, or memory, ask the user** rather than guessing.
-- Start around 5–10 agents for a typical CPU experiment; scale up (toward 20–30) for harder search spaces. More agents = more parallel exploration but more cost.
+These drive cost and feasibility, so **when unsure about sandbox count, runtime, GPU type, or memory, ask the user** rather than guessing.
+- Start around 5–10 sandboxes for a typical CPU experiment; scale up (toward 20–30) for harder search spaces. More sandboxes = more parallel exploration but more cost. With a multi-evaluation, size it as (sub-evaluations) × (parallel attempts), or the pieces just serialize.
 - **Always set `max_runtime_seconds`** — default to 1–2 hours (3600–7200) for a first run. Never leave it unset (infinite) unless the user explicitly asks for an open-ended experiment; an uncapped run burns budget silently if the metric plateaus.
 - Only request `accelerators` when the workload genuinely needs a GPU (ML training/inference, CUDA kernels). Available: `a100-80gb`, `a100-40gb`, `h100`, `h200`, `b200`, `a10`, `t4`, `l4`, `l40s`.
+- **Prefer many small GPU sandboxes over one large allocation.** A request like `a100-80gb:8` schedules far more slowly than eight separate `a100-80gb:1` sandboxes, so if the evaluation can be split into independent pieces, do that instead of asking for one big multi-GPU box — see `references/multi-evaluator.md`. Only request multiple GPUs in a single sandbox when one evaluation genuinely needs them together (a model that doesn't fit on one card, multi-GPU communication being the thing under optimization).
 
 ### Validate the configuration
 
 After writing `hive.yaml`, you **must** run `hive create exp -c hive.yaml --dry-run` to confirm the config is valid. Fix any errors before moving on.
 
+Add `--allow-missing-files` only when a `target_code`/`additional_context` path is deliberately absent from the upload — a prebuilt image with `repo.files` narrowed, `source: null`, or a file `setup_script` generates. It's accepted by `hive create exp` and `hive shell` alike; when the whole source directory is uploaded, omit it so a mistyped path still errors.
+
 
 ## Step 5 — Wrap up
 
-Once all files are written, conclude with a summary and offer next steps. Use this template:
+Once all files are written, conclude with a summary and offer next steps. Everything between the horizontal rules below is the template for what the user sees — fill in the `<…>` placeholders and print only that.
+
+Three parts of it depend on the config you wrote:
+- `<evaluator command>` — `python3 evaluate.py` normally; for a multi-evaluation (`repo.evaluation_arguments`), `python3 /opt/hiverge/scripts/run_multi_evaluator.py <config path inside the sandbox>` instead.
+- `--allow-missing-files` — include it on `hive shell` and `hive create exp` if the Step 4 dry-run needed it; drop it otherwise.
+- The **Build and push the image** block — keep it only for a custom base image; drop that whole section for a stock one.
 
 ---
 
 **Summary of what was created:**
 
 - `evaluate.py` — <metric chosen, how fitness is computed, and what correctness checks gate it>
-- `hive.yaml` — <key config choices: image strategy, num_agents, timeout, target>
+- `hive.yaml` — <key config choices: image strategy, num_sandboxes, timeout, target>
 - <any other files: Dockerfile, baseline implementation, requirements.txt, etc.>
 
 **Choices made:**
 
 - <non-obvious decisions the agent made autonomously — e.g. image strategy, timeout value, fitness formulation, resource sizing>
 
-**If using a custom image, also include:**
+**Build and push the image**
 
 ```
 # Build and push the image:
@@ -349,9 +365,22 @@ hive push image <local-tag> hive:<remote-tag>:<version>
 # run, so changes take effect immediately without a rebuild + re-push.
 ```
 
+**Recommended before launching — validate the evaluator in a real sandbox**
+
+`hive shell` builds the same sandbox this config describes and drops you into it, so you can check the evaluator against the real environment before spending compute:
+
+```
+hive shell -c /absolute/path/to/hive.yaml --max-duration 600
+
+# inside the sandbox:
+<evaluator command>    # want "status": "success" on the last line, well under evaluation_timeout
+```
+
+<for a multi-evaluation only: explain that this runner reproduces the Hive's pipeline — it runs the evaluation script once per `evaluation_arguments` entry, then passes the results to the aggregation script, whose final line is the fitness the experiment would record — but runs the pieces in series in the one sandbox rather than concurrently across parallel sandboxes>
+
 **How to launch the Hive experiment**
 
-Run
+Once the evaluator checks out, run
 
 ```
 hive create exp -c /absolute/path/to/hive.yaml
@@ -360,7 +389,5 @@ hive create exp -c /absolute/path/to/hive.yaml
 Other useful commands:
 - `hive dashboard` — watch progress and fitness over time
 - `hive stop exp <name>` — stop the run
-
-Before spending compute, it's worth validating locally — reproduce the sandbox and confirm `evaluate.py` prints `"status": "success"` on the baseline — and re-reading the evaluator for reward-hacking loopholes (see "Guard against reward hacking" in Step 3), so the Hive optimizes the metric you actually intended.
 
 ---
