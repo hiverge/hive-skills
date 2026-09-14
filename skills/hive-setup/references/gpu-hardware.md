@@ -7,35 +7,30 @@ How to pick `provider`, and how to size `sandbox.resources` so sandboxes fit ont
 
 `provider` is a **top-level** field in `hive.yaml` (sibling of `experiment_name`, `repo`, `runtime`, `sandbox`), and takes `aws` or `modal`.
 
-Apply these rules in order — the outcome is a derivation, not a user preference, so set the field and report it rather than asking:
+Apply these rules in order. Only the first depends on something you can't read off the config — ask that one question, then derive the rest and report the outcome rather than asking again:
 
-1. **Premium GPU ⇒ `modal`.** If `accelerators` names `a100-40gb`, `a100-80gb`, `h100`, `h200`, `b200`, schedule on Modal. On AWS these live almost exclusively on 8-GPU instances (see the catalog below), so a sandbox has to wait for a whole 8-GPU machine and then shares it with — at best — seven siblings. Modal allocates a single premium GPU per container with an independent CPU request, so it schedules faster and wastes nothing.
-2. **Any GPU with a modest CPU need (< 8 vCPU) ⇒ `modal`.** Small single-GPU sandboxes are exactly what Modal's per-container GPU allocation is good at, and they schedule far faster there than while waiting for a slice of a GPU instance.
-3. **Otherwise ⇒ `aws`.** CPU-only experiments, and CPU-heavy (≥ 8 vCPU) sandboxes on the smaller GPUs (`t4`, `l4`, `a10`, `l40s`), which have generous 1-GPU instance sizes.
-
-
-## Fitting sandboxes onto AWS GPU machines
-
-Hive runs sandboxes on Kubernetes, so a machine can't hand its full vCPU count to sandboxes — **about 2 vCPU per machine** stays reserved for the system components. A machine of `V` vCPU therefore has `V - 2` to give out, and fits `floor((V - 2) / cpu)` sandboxes.
-
-AWS sells GPU machines only in discrete tiers (see the catalog below), so accelerator, `cpu`, and `num_sandboxes` have to be chosen *together*, aiming at a combination that fills whole machines with as little waste as possible. Three ways a request misses:
-
-- **It spills into the next tier up.** Ask for exactly a tier's vCPU count and the reserve no longer fits: `l4:1` with `cpu: "16"` can't go on a `g6.4xlarge` (16 vCPU, only 14 available), so it lands on a `g6.8xlarge` (32 vCPU) — twice the machine for 2 extra vCPU, at a higher price and with less capacity to schedule against.
-- **It strands GPUs.** Each sandbox takes one GPU, so a 4-GPU machine is only fully used if 4 sandboxes fit on it — and vCPU is what decides how many fit. Ask for too much `cpu` and you run out of vCPU before you run out of GPUs, leaving idle GPUs you're still paying for.
-- **It leaves a machine half empty.** `num_sandboxes` matters just as much: ask for 3 sandboxes on a 4-GPU machine and the fourth GPU has nothing to run. Round `num_sandboxes` up to a multiple of what fits on one machine — those extra sandboxes come on hardware you're already paying for, so they buy more parallel exploration for close to nothing.
+1. **CPU-sensitive/heavy measurement ⇒ `aws`.** Ask the user whether the score their evaluator computes depends on CPU performance: e.g., wall-clock timing that includes host-side work. If so, use AWS as they have more stable and superior CPU performance.
+2. **Otherwise, any GPU ⇒ `modal`.** Modal allocates one GPU per container with an independent CPU request, so it provisions much faster than waiting for a free slice of a whole AWS GPU instance, and you're billed per container rather than for the GPUs a partly-filled machine leaves idle. The gap is widest on the premium accelerators (`a100-40gb`, `a100-80gb`, `h100`, `h200`, `b200`), which on AWS live almost exclusively on 8-GPU machines (see the catalog below).
+3. **No GPU ⇒ `aws`.**
 
 
-### AWS GPU instance catalog
+## Fitting sandboxes onto GPU machines
 
-Sources: AWS instance-type pages for 
-- [G4dn](https://aws.amazon.com/ec2/instance-types/g4/)
-- [G5](https://aws.amazon.com/ec2/instance-types/g5/)
-- [G6](https://aws.amazon.com/ec2/instance-types/g6/)
-- [G6e](https://aws.amazon.com/ec2/instance-types/g6e/)
-- [P4](https://aws.amazon.com/ec2/instance-types/p4/)
-- [P5](https://aws.amazon.com/ec2/instance-types/p5/)
-- [P6](https://aws.amazon.com/ec2/instance-types/p6/)
-(retrieved 2026-09-14). Availability changes by region and over time; treat this as the shape of the fleet rather than a guarantee that a given size is schedulable today.
+Each sandbox takes one GPU, and Kubernetes holds back **about 2 vCPU per machine** for system components. So a tier of `V` vCPU and `G` GPUs has `V - 2` vCPU to give out, fits `floor((V - 2) / cpu)` sandboxes, and is fully used only when `cpu` is at or below its per-GPU budget of `(V - 2) / G`.
+
+GPU machines are sold only in discrete tiers, so accelerator, `cpu` and `num_sandboxes` have to be chosen *together*. AWS publishes the most flexible range of GPU sizes, so treat the catalog below as the proxy for what a sandbox shape can land on — **including on Modal**, which rents from the same clouds and so can't obtain a shape no provider sells.
+
+Exceed a tier's per-GPU budget and the sandbox spills onto a larger tier, where something sits idle:
+
+- **vCPU idle.** The tier that takes the sandbox hands it more cores than it asked for, so you pay for cores nothing uses — and you wait longer for a rarer machine. e.g., `l4:1` with `cpu: "16"` exceeds the 14 available on a `g6.4xlarge`, so it lands on a `g6.8xlarge` and uses 16 of that machine's 30.
+- **GPUs idle.** vCPU runs out before the cards do, so fewer sandboxes fit than the machine has GPUs. e.g., `l4:1` with `cpu: "64"` lands on a `g6.24xlarge` — 94 vCPU available, 4 L4s — where one sandbox fits and 3 GPUs are paid for and unused. Similarly, ask for 3 sandboxes on a 4-GPU machine and the fourth GPU has nothing to run, so round `num_sandboxes` up to a multiple of what fits on one machine.
+
+The two providers fail differently. On AWS an ill-fitting request still runs — you just pay for the idle hardware. On Modal a container whose CPU-per-GPU ratio would leave the host's remaining GPUs unusable (e.g., `l4:1` with `cpu: "64"`) may never be scheduled at all, so the experiment fails to even start.
+
+
+### GPU instance catalog
+
+AWS sizes, used as the proxy for both providers (see above). Source: [Specifications for Amazon EC2 accelerated computing instances](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html), whose performance-specifications table gives the vCPU count, accelerator count and accelerator model of every size (retrieved 2026-09-14). Availability changes by region and over time; treat this as the shape of the fleet rather than a guarantee that a given size is schedulable today.
 
 | Accelerator | Family | Sizes (vCPU / GPUs) |
 |---|---|---|
@@ -55,8 +50,7 @@ Sources: AWS instance-type pages for
 If the user asks to change `cpu`, the accelerator, or `num_sandboxes` in a way that wastes hardware, warn them before applying it — don't accept it silently, and don't quietly substitute your own numbers either; they may know something you don't about the workload. Tell them, concretely:
 
 - which machine the new request lands on, and how many sandboxes fit on it once the ~2 vCPU reserve is taken out;
-- how many GPUs that leaves idle, or which larger machine tier it spills onto;
-- the nearest values that would fit cleanly, and that a smaller `cpu` is both **cheaper** and **quicker to schedule** — it fits the same sandboxes onto fewer machines, and needs a smaller free slice to land on;
-- that `provider: modal` sidesteps the whole question for single-GPU sandboxes.
+- how many GPUs that leaves idle, or which larger machine tier it spills onto — or, on `modal`, that a CPU-per-GPU ratio no host can satisfy may mean the sandbox never provisions, so the experiment stalls rather than costing more;
+- the nearest values that would fit cleanly, and that a smaller `cpu` is both **cheaper** and **quicker to schedule** — it fits the same sandboxes onto fewer machines, and needs a smaller free slice to land on.
 
 Then ask whether to reduce `cpu`, raise `num_sandboxes` to fill the machine, or keep the request as it is. If they confirm it, apply it and note the trade-off in the Step 5 summary.
