@@ -34,7 +34,7 @@ If the evaluation splits into independent pieces that can be scored in parallel 
 ### What to evolve
 
 0. **Starting point** — does a working implementation already exist, or are you bootstrapping one? Look at the repo: is there real algorithm code in the target, or just stubs/interfaces/`NotImplementedError`/a problem spec? If it's the latter (or there's no repo at all), you'll write the baseline in Step 2 before wrapping it. When in doubt, ask the user whether they have a starting solution or want you to create one.
-1. **Target code — and the scope of evolution.** First settle *how wide* the search should be: is this one algorithm/heuristic/kernel in a single or a few distinct, well-defined files (name those paths, ideally down to functions or line ranges), or a general whole-codebase optimization where the win could come from anywhere (leave the target open and fence off what must stay fixed)? Ask if it's ambiguous — see the `target_code` note in Step 4 for how each case is expressed. Either way, everything outside the target stays frozen, so the target should cover the algorithm and not the test harness. **Target code in place** — don't extract parts of the code into a new file for the experiment. Target them where they already live so agents see each value next to the logic it affects.
+1. **Target code — and the scope of evolution.** First settle *how wide* the search should be: is this one algorithm/heuristic/kernel in a single or a few distinct, well-defined files (name those paths), or a general whole-codebase optimization where the win could come from anywhere (leave the target open and fence off what must stay fixed)? Ask if it's ambiguous — see the `target_code` note in Step 4 for how each case is expressed. Either way, everything outside the target stays frozen, so the target should cover the algorithm and not the test harness. **Target code in place** — don't extract parts of the code into a new file for the experiment. Target them where they already live so agents see each value next to the logic it affects.
 2. **Metric** — what "better" means. Throughput, latency, accuracy, compression ratio, etc. Hive *maximizes* fitness, so a quantity you want to minimize (like runtime) must be negated or inverted (see Step 3).
 3. **Correctness** — how to tell a candidate is *valid*. This is what stops the optimizer from cheating.
 4. **Test inputs** — how evaluation inputs are produced (generated, loaded from a fixture, a benchmark dataset).
@@ -110,7 +110,7 @@ Evolution works best with a graded signal, not pass/fail. Aim for a metric that 
 
 Faster evaluation means faster iteration, so target well under the `sandbox.evaluation_timeout` on baseline code — with headroom, since better solutions sometimes use more time/memory and resource exhaustion counts as a failure.
 
-If a single evaluation is unavoidably slow because it grinds through independent pieces — dataset slices, a suite of benchmarks, many test scenarios — you can split it across sandboxes to run them concurrently instead of serially. That's a **multi-evaluator**: `repo.evaluation_arguments` runs `evaluate.py` once per argument set, and a separate `aggregation_script` you also write combines the per-piece results into the final fitness. It changes the shape of both `evaluate.py` (it must take arguments selecting its piece) and `hive.yaml`, so decide before writing either — read `references/multi-evaluator.md` if you're going this route.
+If evaluation is unavoidably slow because it grinds through independent pieces — dataset slices, a suite of benchmarks, many test scenarios — you can split it across sandboxes to run them concurrently instead of serially. That's a **multi-evaluation**: if `repo.evaluation_arguments` is set, then `evaluate.py` is run once per entry in this list on its own sandbox, and a separate `aggregation_script` you also write combines the per-piece results into the final fitness. It changes the shape of both `evaluate.py` (it must take arguments selecting its piece) and `hive.yaml`, so decide before writing either — read `references/multi-evaluator.md` if you're going this route.
 
 ### Single vs. multi-objective fitness
 
@@ -308,8 +308,8 @@ This is the agents' primary steer. Write it as an onboarding document — imagin
 Field-level details (types, defaults, full syntax) are in `references/configuration.md`. These are the choices that matter most:
 
 - **`target_code`** — decide the **scope of evolution** here; it's a real choice, not a formality.
-  - *Bounded scope* — the thing being optimized is one algorithm, heuristic, or kernel living in a single file or a few distinct, well-defined ones. **List those paths explicitly** (narrow to line ranges where the file mixes the algorithm with harness/plumbing). This is the common case, and a tight target concentrates the search on the code that actually moves the metric.
-  - *Whole-codebase scope* — the user wants the system optimized end-to-end and the wins could come from anywhere, with no single obvious hot file. **Leave `target_code` empty**, which lets the Hive evolve any file except the evaluation script, and use `!`-prefixed entries to fence off what must stay fixed (`["!fixed.py"]` = evolve everything but `fixed.py`). Fence off anything correctness depends on — reference implementations, checkers, fixtures, test harnesses — otherwise the agents can weaken the very code that's meant to catch them.
+  - *Bounded scope* — the thing being optimized is one algorithm, heuristic, or kernel living in a single file or a few distinct, well-defined ones. **List those paths explicitly** (narrow to line ranges where the file mixes the algorithm with harness/plumbing).
+  - *Whole-codebase scope* — the user wants the system optimized end-to-end and the wins could come from anywhere, with no single obvious hot file. **Leave `target_code` empty**, which lets the Hive evolve any file except the evaluation (and aggregation) script, and use `!`-prefixed entries to fence off what must stay fixed (`["!fixed.py"]` = evolve everything but `fixed.py`). Fence off anything correctness depends on — reference implementations, checkers, fixtures, test harnesses — otherwise the agents can weaken the very code that's meant to catch them.
   - **If it's unclear which of the two the user wants, ask.** Getting this wrong is expensive in opposite directions: too narrow and the Hive can't reach the improvement; too broad and the search dilutes across files that don't matter.
 - **`setup_script`** — the most common source of failures. Runs from repo root; must install everything `evaluate.py` imports. Omit only if the base image already has every dependency.
 - **Large data (GBs)** — if data is public, download in `setup_script` (curl/wget/`huggingface-cli`), not via `source`/`repo.files`. Multi-GB uploads are slow and may fail.
@@ -320,7 +320,7 @@ Field-level details (types, defaults, full syntax) are in `references/configurat
 ### Choosing `num_sandboxes`, `max_runtime_seconds` and hardware — ask if unsure
 
 These drive cost and feasibility, so **when unsure about sandbox count, runtime, GPU type, or memory, ask the user** rather than guessing.
-- Start around 5–10 sandboxes for a typical CPU experiment; scale up (toward 20–30) for harder search spaces. More sandboxes = more parallel exploration but more cost. With a multi-evaluator, size it as (sub-evaluations) × (parallel attempts), or the pieces just serialize.
+- Start around 5–10 sandboxes for a typical CPU experiment; scale up (toward 20–30) for harder search spaces. More sandboxes = more parallel exploration but more cost. With a multi-evaluation, size it as (sub-evaluations) × (parallel attempts), or the pieces just serialize.
 - **Always set `max_runtime_seconds`** — default to 1–2 hours (3600–7200) for a first run. Never leave it unset (infinite) unless the user explicitly asks for an open-ended experiment; an uncapped run burns budget silently if the metric plateaus.
 - Only request `accelerators` when the workload genuinely needs a GPU (ML training/inference, CUDA kernels). Available: `a100-80gb`, `a100-40gb`, `h100`, `h200`, `b200`, `a10`, `t4`, `l4`, `l40s`.
 - **Prefer many small GPU sandboxes over one large allocation.** A request like `a100-80gb:8` schedules far more slowly than eight separate `a100-80gb:1` sandboxes, so if the evaluation can be split into independent pieces, do that instead of asking for one big multi-GPU box — see `references/multi-evaluator.md`. Only request multiple GPUs in a single sandbox when one evaluation genuinely needs them together (a model that doesn't fit on one card, multi-GPU communication being the thing under optimization).
@@ -329,10 +329,17 @@ These drive cost and feasibility, so **when unsure about sandbox count, runtime,
 
 After writing `hive.yaml`, you **must** run `hive create exp -c hive.yaml --dry-run` to confirm the config is valid. Fix any errors before moving on.
 
+Add `--allow-missing-files` only when a `target_code`/`additional_context` path is deliberately absent from the upload — a prebuilt image with `repo.files` narrowed, `source: null`, or a file `setup_script` generates. It's accepted by `hive create exp` and `hive shell` alike; when the whole source directory is uploaded, omit it so a mistyped path still errors.
+
 
 ## Step 5 — Wrap up
 
-Once all files are written, conclude with a summary and offer next steps. Use this template:
+Once all files are written, conclude with a summary and offer next steps. Everything between the horizontal rules below is the template for what the user sees — fill in the `<…>` placeholders and print only that.
+
+Three parts of it depend on the config you wrote:
+- `<evaluator command>` — `python3 evaluate.py` normally; for a multi-evaluation (`repo.evaluation_arguments`), `python3 /opt/hiverge/scripts/run_multi_evaluator.py <config path inside the sandbox>` instead.
+- `--allow-missing-files` — include it on `hive shell` and `hive create exp` if the Step 4 dry-run needed it; drop it otherwise.
+- The **Build and push the image** block — keep it only for a custom base image; drop that whole section for a stock one.
 
 ---
 
@@ -346,7 +353,7 @@ Once all files are written, conclude with a summary and offer next steps. Use th
 
 - <non-obvious decisions the agent made autonomously — e.g. image strategy, timeout value, fitness formulation, resource sizing>
 
-**If using a custom image, also include:**
+**Build and push the image**
 
 ```
 # Build and push the image:
@@ -366,8 +373,10 @@ hive push image <local-tag> hive:<remote-tag>:<version>
 hive shell -c /absolute/path/to/hive.yaml --max-duration 600
 
 # inside the sandbox:
-python3 evaluate.py    # want "status": "success" on the last line, well under evaluation_timeout
+<evaluator command>    # want "status": "success" on the last line, well under evaluation_timeout
 ```
+
+<for a multi-evaluation only: explain that this runner reproduces the Hive's pipeline — it runs the evaluation script once per `evaluation_arguments` entry, then passes the results to the aggregation script, whose final line is the fitness the experiment would record — but runs the pieces in series in the one sandbox rather than concurrently across parallel sandboxes>
 
 **How to launch the Hive experiment**
 

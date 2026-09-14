@@ -19,7 +19,7 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/configuration
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `apiversion` | string | `v1alpha1` | Schema version |
-| `experiment_name` | string | required | Valid DNS label (`[a-z0-9-]`, max 63 chars, no leading `-`); trailing `-` appends a random unique suffix |
+| `experiment_name` | string | required | Valid DNS label (`[a-z0-9-]`, max 51 chars, no leading `-`); trailing `-` appends a random 7-char unique suffix, so a name ending in `-` may have at most 43 chars before the `-` |
 | `coordinator_config_name` | string | `default-coordinator-config` | |
 
 ## `repo`
@@ -29,9 +29,9 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/configuration
 | `files` | list[string] | `[]` | Files/dirs to include from `source`. Empty = everything. Patterns applied in order; `!`-prefix excludes; globs (`*`, `?`, `[…]`) supported. Hidden files and symlinks skipped. |
 | `branch` | string | `main` | Branch to use when cloning a remote source |
 | `evaluation_script` | string | `evaluation.py` | Path relative to repo root; run as `python3 <path>` |
-| `evaluation_arguments` | list | `[]` | Splits evaluation into several concurrent sub-evaluators — one entry per evaluator, passed as that run's command-line arguments. Requires `aggregation_script`. See `references/multi-evaluator.md`. |
-| `aggregation_script` | string | `null` | Combines per-evaluator results into the experiment's final result. Only valid with `evaluation_arguments`. See `references/multi-evaluator.md`. |
-| `target_code` | list[string] | `[]` | Files/ranges the agents may rewrite. Empty = every file in the codebase is evolvable (except the evaluation script); `!`-prefix excludes, e.g. `["!fixed.py"]` = evolve everything but `fixed.py`. Any file extension is allowed. |
+| `evaluation_arguments` | list | `[]` | Splits evaluation into several concurrent sub-evaluations — one entry per sub-evaluation, passed as that run's command-line arguments. Requires `aggregation_script`. See `references/multi-evaluator.md`. |
+| `aggregation_script` | string | `null` | Combines per-sub-evaluation results into the experiment's final result. Only valid with `evaluation_arguments`. See `references/multi-evaluator.md`. |
+| `target_code` | list[string] | `[]` | Files/ranges the agents may rewrite. Empty = every file in the codebase is evolvable (except the evaluation script); `!`-prefix excludes, e.g. `["!fixed.py"]` = evolve everything but `fixed.py`. Any plain text file is allowed. |
 | `additional_context` | list[string] | `[]` | Supporting files agents read but don't edit |
 
 **`target_code` / file list syntax:** `main.py` (whole file), `main.py:1-50` (line range), `main.py:1-10&21-30` (multiple ranges).
@@ -172,8 +172,8 @@ Source: https://docs.hiverge.ai/gettingstarted/cli/reference
 
 - `hive init` — set up `~/.hive/config.yaml` (org ID)
 - `hive login` / `hive logout` — authenticate / clear credentials
-- `hive create exp -c hive.yaml [--dry-run] [key.path=value ...]` — launch; `--dry-run` validates the config without starting anything; inline dot-notation overrides the YAML; `~key.path` removes a key (restores default)
-- `hive shell -c hive.yaml [--max-duration SECONDS] [--allow-missing-files]` — open an interactive shell in a sandbox built from the config; the way to reproduce the environment and test `evaluate.py` before spending compute. Also `hive shell --exp <name> --content-uid <uid>` to enter a sandbox for a specific candidate from a running experiment
+- `hive create exp -c hive.yaml [--dry-run] [--allow-missing-files] [key.path=value ...]` — launch; `--dry-run` validates the config without starting anything; inline dot-notation overrides the YAML; `~key.path` removes a key (restores default)
+- `hive shell -c hive.yaml [--max-duration SECONDS] [--allow-missing-files]` — open an interactive shell in a sandbox built from the config; the way to reproduce the environment and test `evaluate.py` before spending compute. `--allow-missing-files` skips the check that every configured path exists in the uploaded source — needed only when a `target_code`/`additional_context` entry comes from the base image or `setup_script` instead (narrowed `repo.files`, `source: null`); omit it otherwise so real typos still surface. Also `hive shell --exp <name> --content-uid <uid>` to enter a sandbox for a specific candidate from a running experiment
 - `hive list exp` — table of experiments (NAME, AGENTS ready/total, STATUS, AGE)
 - `hive get exp <name>` — detailed spec + status
 - `hive get config <name>` — the resolved config an experiment is running with
