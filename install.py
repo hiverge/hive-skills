@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Install the skills in this repo into a coding agent's skills directory.
 
+DEPRECATED: superseded by `hive skills install` in the Hivekit CLI, which ships
+these skills as package data. This script still works but is unmaintained.
+
 A "skill" is just a folder containing a SKILL.md (plus any supporting files).
 Installing means copying that folder into the agent's skills directory. Some
 agents share a directory (Gemini CLI and Antigravity both read
@@ -130,6 +133,10 @@ def parse_args(argv: list[str]) -> list[str]:
 
 
 def main(argv: list[str]) -> None:
+    print(
+        "warning: install.py is deprecated. Use `hive skills install` instead.",
+        file=sys.stderr,
+    )
     agent_keys = parse_args(argv)
     skills = discover_skills()
 
